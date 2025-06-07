@@ -23,12 +23,26 @@ function loadApiKey() {
 let selectedPiece = null; // {element, row, col, pieceSymbol}
 const humanPlayerColor = 'white';
 const llmPlayerColor = 'black';
-let currentPlayerTurn = humanPlayerColor; // Human (white) starts
+let currentPlayerTurn = humanPlayerColor; // Human (white) starts 
 
-// Unicode pieces
+// Image paths for pieces
 const PIECES = {
-  white: { king: '♔', queen: '♕', rook: '♖', bishop: '♗', knight: '♘', pawn: '♙' },
-  black: { king: '♚', queen: '♛', rook: '♜', bishop: '♝', knight: '♞', pawn: '♟' },
+  white: {
+    king: './images/king.png',
+    queen: './images/queen.png',
+    rook: './images/rook.png',
+    bishop: './images/bishop.png',
+    knight: './images/knight.png',
+    pawn: './images/pawn.png'
+  },
+  black: {
+    king: './images/king1.png',
+    queen: './images/queen1.png',
+    rook: './images/rook1.png',
+    bishop: './images/bishop1.png',
+    knight: './images/knight1.png',
+    pawn: './images/pawn1.png'
+  },
 };
 
 const initialBoardSetup = {
@@ -55,7 +69,6 @@ function renderChessboard() {
       square.style.display = 'flex';
       square.style.justifyContent = 'center';
       square.style.alignItems = 'center';
-      square.style.fontSize = '36px';
       square.dataset.row = row;
       square.dataset.col = col;
 
@@ -63,7 +76,11 @@ function renderChessboard() {
       if (pieceSymbol) {
         square.textContent = pieceSymbol;
       }
-      square.addEventListener('click', onSquareClick);
+      const pieceImage = document.createElement('img');
+      pieceImage.src = pieceSymbol;
+      pieceImage.style.width = '100%'; // Make image fill the square
+      pieceImage.style.height = '100%';
+      square.appendChild(pieceImage);
       chessboard.appendChild(square);
     }
   }
