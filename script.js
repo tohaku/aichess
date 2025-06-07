@@ -15,8 +15,7 @@ function loadApiKey() {
     apiKey = storedApiKey;
     apiKeyInput.value = storedApiKey; // Populate the input field
     console.log("API Key loaded from localStorage.");
-    // Optionally, provide a silent feedback or a subtle UI indication
-    // addMessageToChat("API Key loaded from local storage.", "System", "system");
+    addMessageToChat("API Key loaded from local storage.", "System", "system-info"); // Provide feedback
   }
 }
 
@@ -55,6 +54,23 @@ const initialBoardSetup = {
 let currentBoard = JSON.parse(JSON.stringify(initialBoardSetup));
 let gameActive = true; // Flag to control if moves can be made
 
+// --- Helper function for image alt text ---
+function getPieceNameFromPath(imagePath) {
+    if (!imagePath) return '';
+    // Example: './images/king.png' -> 'king'
+    // This is a simple parser; a more robust one might reverse lookup PIECES
+    const fileName = imagePath.substring(imagePath.lastIndexOf('/') + 1);
+    const pieceName = fileName.replace('.png', '').replace('1', ''); // Removes '1' for black pieces
+
+    for (const color in PIECES) {
+        for (const type in PIECES[color]) {
+            if (PIECES[color][type] === imagePath) {
+                return `${color} ${type}`;
+            }
+        }
+    }
+    return pieceName; // Fallback if not found in PIECES (should not happen with current setup)
+}
 // --- Chessboard Rendering ---
 function renderChessboard() {
   chessboard.innerHTML = '';
@@ -72,15 +88,15 @@ function renderChessboard() {
       square.dataset.row = row;
       square.dataset.col = col;
 
-      const pieceSymbol = currentBoard[row]?.[col];
-      if (pieceSymbol) {
-        square.textContent = pieceSymbol;
+      const imagePath = currentBoard[row]?.[col];
+      if (imagePath) { // Only add an image if a piece exists on the square
+        const pieceImage = document.createElement('img');
+        pieceImage.src = imagePath;
+        pieceImage.alt = getPieceNameFromPath(imagePath); // Add alt text for accessibility
+        pieceImage.style.width = '100%'; // Make image fill the square
+        pieceImage.style.height = '100%';
+        square.appendChild(pieceImage);
       }
-      const pieceImage = document.createElement('img');
-      pieceImage.src = pieceSymbol;
-      pieceImage.style.width = '100%'; // Make image fill the square
-      pieceImage.style.height = '100%';
-      square.appendChild(pieceImage);
       chessboard.appendChild(square);
     }
   }
@@ -197,6 +213,13 @@ function isMoveValid(pieceSymbol, fromRow, fromCol, toRow, toCol, board) {
   return false;
 }
 
+// --- Coordinate and Move Notation Helpers ---
+function coordsToAlgebraic(row, col) {
+    if (row < 0 || row > 7 || col < 0 || col > 7) return "??"; // Should not happen
+    const file = String.fromCharCode('a'.charCodeAt(0) + col);
+    const rank = (8 - row).toString();
+    return file + rank;
+}
 async function onSquareClick(event) {
   if (!gameActive || currentPlayerTurn !== humanPlayerColor) return; // Only human can click
 
@@ -232,9 +255,11 @@ async function onSquareClick(event) {
         selectedElement.classList.remove('selected');
         selectedPiece = null;
         renderChessboard();
-        addMessageToChat(`${humanPlayerColor} moved ${pieceSymbol} from (${fromRow},${fromCol}) to (${toRow},${toCol})`, "System", "system");
 
-        currentPlayerTurn = llmPlayerColor;
+        const humanMoveFromAlg = coordsToAlgebraic(fromRow, fromCol);
+        const humanMoveToAlg = coordsToAlgebraic(toRow, toCol);
+        const humanMoveNotation = `${humanPlayerColor} (Human) moved ${getPieceNameFromPath(pieceSymbol)} from ${humanMoveFromAlg} to ${humanMoveToAlg}.`;
+        addMessageToChat(humanMoveNotation, "System", "system");
 
         if (isKingInCheck(llmPlayerColor, currentBoard)) {
           addMessageToChat(`${llmPlayerColor} (LLM) is in check!`, "System", "system");
@@ -249,8 +274,9 @@ async function onSquareClick(event) {
            }
         }
         if (gameActive) {
-            addMessageToChat(`${llmPlayerColor}'s (LLM) turn.`, "System", "system");
-            await handleLLMTurn();
+            currentPlayerTurn = llmPlayerColor;
+            addMessageToChat(`${llmPlayerColor}'s (LLM) turn. Requesting move from LLM...`, "System", "system");
+            await handleLLMTurn(humanMoveNotation); // Pass human's move notation
         }
       }
     } else { // Invalid move by basic rules
@@ -346,29 +372,131 @@ function canMoveOutOfCheck(kingColor, boardState) {
   return getAllLegalMoves(kingColor, boardState).length > 0;
 }
 
-// --- LLM Chess Opponent Logic ---
-function formatBoardForLLM(boardState) {
-  return JSON.stringify(boardState); // Simple JSON for now
+// --- LLM Chess Opponent Logic & Helpers ---
+
+function algebraicToCoords(algebraicSquare) { // e.g., "e4"
+    if (!algebraicSquare || algebraicSquare.length !== 2) return null;
+    const colChar = algebraicSquare.charAt(0).toLowerCase();
+    const rowChar = algebraicSquare.charAt(1);
+
+    const col = colChar.charCodeAt(0) - 'a'.charCodeAt(0);
+    const row = 8 - parseInt(rowChar);
+
+    if (col < 0 || col > 7 || isNaN(row) || row < 0 || row > 7) return null;
+    return { row, col };
 }
 
-async function getLLMMove(boardState, turnColor) {
+function parseAlgebraicMove(moveString, playerColor, board) { // e.g., "e2e4" or "e7e8q"
+    if (!moveString || typeof moveString !== 'string' || moveString.length < 4 || moveString.length > 5) {
+        console.error("Invalid algebraic move string format:", moveString);
+        addMessageToChat(`LLM returned unparseable move: ${moveString}`, "System", "system-error");
+        return null;
+    }
+
+    const fromAlg = moveString.substring(0, 2);
+    const toAlg = moveString.substring(2, 4);
+    // TODO: Handle promotion piece if present (e.g., moveString.charAt(4) for 'q', 'r', 'b', 'n')
+
+    const fromCoords = algebraicToCoords(fromAlg);
+    const toCoords = algebraicToCoords(toAlg);
+
+    if (!fromCoords || !toCoords) {
+        console.error("Could not parse algebraic coordinates from move:", moveString);
+        addMessageToChat(`LLM move ${moveString} has invalid coordinates.`, "System", "system-error");
+        return null;
+    }
+
+    const pieceSymbol = board[fromCoords.row]?.[fromCoords.col];
+    if (!pieceSymbol) {
+        console.error(`No piece found at source square ${fromAlg} (${fromCoords.row},${fromCoords.col}) on the board for LLM move ${moveString}.`);
+        addMessageToChat(`LLM tried to move from an empty square: ${fromAlg}.`, "System", "system-error");
+        return null;
+    }
+    if (getPieceColor(pieceSymbol) !== playerColor) {
+        console.error(`Piece at source square ${fromAlg} (${getPieceColor(pieceSymbol)}) is not LLM's color (${playerColor}). Move: ${moveString}`);
+        addMessageToChat(`LLM tried to move opponent's piece at ${fromAlg}.`, "System", "system-error");
+        return null;
+    }
+
+    // Optional: More robust validation against getAllLegalMoves if desired,
+    // but the main game loop already checks isMoveValid and self-check.
+    // For now, we trust the LLM to return a valid format, and basic checks are done.
+    // The isMoveValid check in handleLLMTurn will be the ultimate decider.
+
+    return {
+        fromRow: fromCoords.row,
+        fromCol: fromCoords.col,
+        toRow: toCoords.row,
+        toCol: toCoords.col,
+        pieceSymbol: pieceSymbol // The actual piece on the 'from' square
+    };
+}
+
+async function getLLMMove(boardState, turnColor, humanLastMove) {
   addMessageToChat("LLM is thinking...", "System", "system");
-  return new Promise(resolve => { // Simulate API call
-    setTimeout(() => {
-      const possibleMoves = getAllLegalMoves(turnColor, boardState);
-      if (possibleMoves.length > 0) {
-        const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-        resolve(randomMove); // Returns { fromRow, fromCol, toRow, toCol, pieceSymbol }
-      } else {
-        resolve(null); // No legal moves
-      }
-    }, 1000);
-  });
+
+  if (!apiKey || apiKey.trim() === '') {
+    addMessageToChat("API key not set. LLM will make a random move.", "System", "system-warning");
+    // Fallback to random move
+    const possibleMoves = getAllLegalMoves(turnColor, boardState);
+    return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
+  }
+
+  const systemMessage = `You are a chess engine playing as ${turnColor}. Your task is to select the best move. Provide your move ONLY in algebraic notation (e.g., "e7e5", "g1f3", "e1g1" for castling, "e7e8q" for pawn promotion to queen). Do not include any other text, explanations, or apologies. Just the move.`;
+  const userMessageContent = `The human player (${humanPlayerColor === 'white' ? 'white' : 'black'}) just made the move: ${humanLastMove}.
+  Current board state (JSON format: row indices map to column objects, which map to piece image paths. Top-left is 0,0 for black's back rank, which is white's perspective of rank 8):
+  ${JSON.stringify(boardState, null, 2)}
+  It is now ${turnColor}'s turn. What is your move?`;
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo", // Or "gpt-4" or your preferred model
+        messages: [
+          { role: "system", content: systemMessage },
+          { role: "user", content: userMessageContent }
+        ],
+        max_tokens: 15, // For a short move string like "e7e8q"
+        temperature: 0.3, // Lower for more deterministic chess moves
+        n: 1
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("LLM API Error Response Text:", errorText);
+      throw new Error(`LLM API request failed: ${response.status} - ${errorText}`);
+    }
+
+    const responseData = await response.json();
+    // For OpenAI Chat Completions, the response is in choices[0].message.content
+    const llmMoveString = (responseData.choices && responseData.choices[0] && responseData.choices[0].message && responseData.choices[0].message.content) ? responseData.choices[0].message.content.trim() : null;
+
+    if (!llmMoveString) {
+        addMessageToChat("LLM returned an empty move. LLM will make a random move.", "System", "system-warning");
+        const possibleMoves = getAllLegalMoves(turnColor, boardState);
+        return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
+    }
+
+    addMessageToChat(`LLM suggests move: ${llmMoveString}`, "LLM", "llm-suggestion");
+    return parseAlgebraicMove(llmMoveString, turnColor, boardState);
+
+  } catch (error) {
+    console.error("Error getting LLM move:", error);
+    addMessageToChat(`Error with LLM: ${error.message}. LLM will make a random move.`, "System", "system-error");
+    const possibleMoves = getAllLegalMoves(turnColor, boardState);
+    return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
+  }
 }
 
-async function handleLLMTurn() {
+async function handleLLMTurn(humanLastMoveDescription) {
   if (!gameActive) return;
-  const llmMoveData = await getLLMMove(currentBoard, llmPlayerColor);
+  const llmMoveData = await getLLMMove(currentBoard, llmPlayerColor, humanLastMoveDescription);
 
   if (llmMoveData) {
     const { fromRow, fromCol, toRow, toCol } = llmMoveData;
@@ -395,7 +523,9 @@ async function handleLLMTurn() {
 
       currentBoard = tempBoard;
       renderChessboard();
-      addMessageToChat(`LLM (${llmPlayerColor}) moved ${pieceSymbolToMove} from (${fromRow},${fromCol}) to (${toRow},${toCol})`, "System", "system");
+      const llmMoveFromAlg = coordsToAlgebraic(fromRow, fromCol);
+      const llmMoveToAlg = coordsToAlgebraic(toRow, toCol);
+      addMessageToChat(`LLM (${llmPlayerColor}) moved ${getPieceNameFromPath(pieceSymbolToMove)} from ${llmMoveFromAlg} to ${llmMoveToAlg}`, "System", "system");
 
       currentPlayerTurn = humanPlayerColor;
 
@@ -430,7 +560,7 @@ async function handleLLMTurn() {
 
 
 // --- Chat Window Functionality ---
-const LLM_PLACEHOLDER_URL = 'https://jsonplaceholder.typicode.com/posts';
+const CHAT_LLM_URL = 'https://api.openai.com/v1/chat/completions'; // Renamed for clarity
 
 function addMessageToChat(message, sender, type = 'normal') {
   const messageElement = document.createElement('p');
@@ -439,6 +569,9 @@ function addMessageToChat(message, sender, type = 'normal') {
   if (type === 'user') { messageElement.style.color = 'blue'; messageElement.style.textAlign = 'right';}
   else if (type === 'llm') { messageElement.style.color = 'green'; }
   else if (type === 'system') { messageElement.style.fontStyle = 'italic';}
+  else if (type === 'system-info') { messageElement.style.color = '#555'; messageElement.style.fontStyle = 'italic'; }
+  else if (type === 'system-error') { messageElement.style.color = 'red'; messageElement.style.fontWeight = 'bold'; }
+  else if (type === 'system-warning') { messageElement.style.color = 'orange'; }
   messagesContainer.appendChild(messageElement);
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
@@ -450,17 +583,30 @@ async function sendChatMessageToLLM(message) {
   }
   addMessageToChat(message, "You", "user");
   try {
-    const response = await fetch(LLM_PLACEHOLDER_URL, {
+    const chatPayload = {
+        model: "gpt-3.5-turbo", // Or your preferred chat model
+        messages: [
+            { role: "system", content: "You are a helpful assistant." },
+            { role: "user", content: message }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+    };
+
+    const response = await fetch(CHAT_LLM_URL, {
       method: 'POST',
-      body: JSON.stringify({ title: 'User Chat Message', body: message, userId: 1 }),
+      body: JSON.stringify(chatPayload),
       headers: { 'Content-type': 'application/json; charset=UTF-8', 'Authorization': `Bearer ${apiKey}`},
     });
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      throw new Error(`API request failed: ${response.status} ${errorData ? JSON.stringify(errorData) : response.statusText}`);
+      const errorText = await response.text(); // Get raw error text for better debugging
+      console.error("Chat LLM API Error Response Text:", errorText);
+      throw new Error(`API request failed: ${response.status} - ${errorText}`);
     }
+
     const responseData = await response.json();
-    const llmResponseMessage = responseData.body ? `LLM Echo: ${responseData.body}` : "LLM response format unexpected.";
+    const llmResponseMessage = (responseData.choices && responseData.choices[0] && responseData.choices[0].message && responseData.choices[0].message.content) ? responseData.choices[0].message.content.trim() : "LLM response format unexpected or empty.";
     displayLLMResponse(llmResponseMessage);
   } catch (error) {
     console.error("Error sending message to LLM:", error);
@@ -490,6 +636,7 @@ saveApiKeyButton.addEventListener('click', () => {
   const potentialApiKey = apiKeyInput.value;
   if (potentialApiKey && potentialApiKey.trim() !== '') {
     apiKey = potentialApiKey;
+    localStorage.setItem('chessLLMApiKey', apiKey); // Save to localStorage
     addMessageToChat('API Key saved successfully.', 'System', 'system');
   } else {
     addMessageToChat('API Key cannot be empty.', 'System', 'system');
@@ -498,6 +645,9 @@ saveApiKeyButton.addEventListener('click', () => {
 
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
+  loadApiKey(); // Load API key when the DOM is ready
   renderChessboard();
   addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
 });
+ // Added styling for system-info, system-error, system-warning in addMessageToChat
+ // Added llm-suggestion type for LLM's raw output before parsing.

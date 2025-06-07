@@ -1,0 +1,55 @@
+/* --- Chessboard Styles --- */
+.square {
+  width: 50px;
+  height: 50px;
+  float: left;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.light-square {
+  background-color: #f0d9b5;
+}
+
+.dark-square {
+  background-color: #b58863;
+}
+
+.selected {
+  outline: 3px solid yellow;
+  box-sizing: border-box;
+}
+
+/* --- Chat Styles --- */
+.chat-message-user {
+  color: blue;
+  text-align: right;
+}
+
+.chat-message-llm {
+  color: green;
+}
+
+.chat-message-system {
+  font-style: italic;
+}
+
+.chat-message-system-info {
+  color: #555;
+  font-style: italic;
+}
+
+.chat-message-system-error {
+  color: red;
+  font-weight: bold;
+}
+
+.chat-message-system-warning {
+  color: orange;
+}
+
+.chat-message-llm-suggestion {
+  color: purple;
+  font-style: italic;
+}
