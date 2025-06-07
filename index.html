@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Chess AI Interface</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f0f0;
+    color: #333;
+    display: flex;
+    justify-content: center; /* Center main-container */
+  }
+
+  .main-container {
+    display: flex;
+    flex-wrap: wrap; /* Allow wrapping for responsiveness */
+    gap: 20px;
+    width: 100%;
+    max-width: 1000px; /* Max width of the game area */
+  }
+
+  #chessboard {
+    width: 400px;
+    height: 400px;
+    display: flex;
+    flex-wrap: wrap;
+    border: 2px solid #333;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  }
+
+  .square {
+    width: 50px; /* 400px / 8 */
+    height: 50px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 38px; /* Size of Unicode chess pieces */
+    cursor: pointer;
+    border: 1px solid #ccc; /* Light border for squares */
+  }
+
+  /* Colors are set by JS, but we can define a base or override for selected */
+  .square.selected {
+    background-color: rgba(135, 206, 250, 0.7) !important; /* LightSkyBlue with some transparency */
+    border: 2px solid #007bff !important;
+  }
+
+  /* Example for valid move indicators (optional, JS would add/remove this class)
+  .valid-move-indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: rgba(0, 255, 0, 0.3);
+  }
+  */
+
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex-grow: 1; /* Allows chat to take remaining space if board is fixed width */
+    min-width: 300px; /* Minimum width for the chat/settings panel */
+  }
+
+  #chat-window {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    display: flex;
+    flex-direction: column;
+    height: 350px; /* Fixed height, messages will scroll */
+    padding: 10px;
+  }
+
+  #messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    padding: 8px;
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    border-radius: 3px;
+  }
+
+  #messages p {
+    margin: 0 0 8px 0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    line-height: 1.4;
+  }
+
+  .chat-message-user {
+    background-color: #d1e7dd; /* Light green */
+    text-align: right;
+    margin-left: auto; /* Push to right */
+    max-width: 80%;
+  }
+
+  .chat-message-llm {
+    background-color: #e2e3e5; /* Light grey */
+    text-align: left;
+    margin-right: auto; /* Push to left */
+    max-width: 80%;
+  }
+
+  .chat-message-system {
+    background-color: #fff3cd; /* Light yellow */
+    color: #664d03;
+    font-style: italic;
+    text-align: center;
+    font-size: 0.9em;
+    max-width: 100%;
+  }
+
+  .chat-input-area {
+    display: flex;
+    gap: 5px;
+  }
+
+  #chat-input {
+    flex-grow: 1;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 1em;
+  }
+
+  #send-button {
+    padding: 10px 15px;
+    border: none;
+    background-color: #007bff;
+    color: white;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 1em;
+  }
+  #send-button:hover {
+    background-color: #0056b3;
+  }
+
+  #settings {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  }
+  #settings label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+  }
+  #api-key {
+    width: calc(100% - 22px); /* Account for padding/border */
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 1em;
+  }
+  #save-api-key-button {
+    padding: 10px 15px;
+    border: none;
+    background-color: #28a745; /* Green */
+    color: white;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 1em;
+  }
+  #save-api-key-button:hover {
+    background-color: #1e7e34;
+  }
+
+  /* Basic Responsiveness */
+  @media (max-width: 768px) {
+    .main-container {
+      flex-direction: column;
+      align-items: center; /* Center items when stacked */
+    }
+    #chessboard {
+      width: 320px; /* Smaller board for smaller screens */
+      height: 320px;
+    }
+    .square {
+      width: 40px; /* 320px / 8 */
+      height: 40px;
+      font-size: 30px;
+    }
+    .right-panel {
+      width: 100%;
+      max-width: 400px; /* Limit chat width on small screens */
+    }
+    #chat-window {
+        height: 300px;
+    }
+  }
+
+</style>
+</head>
+<body>
+
+<div class="main-container">
+  <div id="chessboard">
+    <!-- Chessboard will be generated here -->
+  </div>
+
+  <div class="right-panel">
+    <div id="chat-window">
+      <div id="messages">
+        <!-- Messages will be displayed here -->
+      </div>
+      <div class="chat-input-area">
+        <input type="text" id="chat-input" placeholder="Type your message...">
+        <button id="send-button">Send</button>
+      </div>
+    </div>
+
+    <div id="settings">
+      <label for="api-key">API Key:</label>
+      <input type="text" id="api-key" name="api-key" placeholder="Enter your API key">
+      <button id="save-api-key-button">Save Key</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
