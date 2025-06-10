@@ -18,9 +18,11 @@ function initializeStockfish() {
     stockfish = new Worker('https://cdn.jsdelivr.net/npm/stockfish/stockfish.js');
     stockfish.postMessage('uci');
     console.log('Stockfish initialized');
+    addMessageToChat('Stockfish engine loaded.', 'System', 'system-info');
   } catch (err) {
     console.error('Failed to load Stockfish:', err);
     stockfish = null;
+    addMessageToChat('Stockfish engine failed to load.', 'System', 'system-warning');
   }
 }
 
@@ -893,6 +895,8 @@ difficultySelect.addEventListener('change', () => {
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
   loadApiKey(); // Load API key when the DOM is ready
+  loadDifficulty();
+  initializeStockfish();
 
   renderChessboard();
   addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');

@@ -111,8 +111,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  flex-grow: 1;
-  min-width: 300px;
+  flex: 0 0 300px; /* keep chat sidebar a consistent width */
+  width: 300px;
 }
 
 #chat-window {
