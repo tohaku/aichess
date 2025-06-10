@@ -8,6 +8,20 @@ const saveApiKeyButton = document.getElementById('save-api-key-button');
 
 let apiKey = ''; // This will be populated from localStorage
 
+// Stockfish engine (loaded as a Web Worker)
+let stockfish = null;
+
+function initializeStockfish() {
+  try {
+    stockfish = new Worker('https://cdn.jsdelivr.net/npm/stockfish/stockfish.js');
+    stockfish.postMessage('uci');
+    console.log('Stockfish initialized');
+  } catch (err) {
+    console.error('Failed to load Stockfish:', err);
+    stockfish = null;
+  }
+}
+
 // --- Load API Key on Start ---
 function loadApiKey() {
   const storedApiKey = localStorage.getItem('chessLLMApiKey');
@@ -474,6 +488,63 @@ function canMoveOutOfCheck(kingColor, boardState) {
   return getAllLegalMoves(kingColor, boardState).length > 0;
 }
 
+// --- Stockfish Helpers ---
+const FEN_PIECE_MAP = {
+  [PIECES.white.king]: 'K',
+  [PIECES.white.queen]: 'Q',
+  [PIECES.white.rook]: 'R',
+  [PIECES.white.bishop]: 'B',
+  [PIECES.white.knight]: 'N',
+  [PIECES.white.pawn]: 'P',
+  [PIECES.black.king]: 'k',
+  [PIECES.black.queen]: 'q',
+  [PIECES.black.rook]: 'r',
+  [PIECES.black.bishop]: 'b',
+  [PIECES.black.knight]: 'n',
+  [PIECES.black.pawn]: 'p'
+};
+
+function boardToFEN(boardState, turnColor) {
+  const rows = [];
+  for (let r = 0; r < 8; r++) {
+    let empty = 0;
+    let rowStr = '';
+    for (let c = 0; c < 8; c++) {
+      const piece = boardState[r]?.[c];
+      if (piece) {
+        if (empty) { rowStr += empty; empty = 0; }
+        rowStr += FEN_PIECE_MAP[piece] || '';
+      } else {
+        empty++;
+      }
+    }
+    if (empty) rowStr += empty;
+    rows.push(rowStr);
+  }
+  const boardPart = rows.join('/');
+  return `${boardPart} ${turnColor === 'white' ? 'w' : 'b'} - - 0 1`;
+}
+
+function getStockfishMove(boardState, turnColor) {
+  return new Promise((resolve) => {
+    if (!stockfish) { resolve(null); return; }
+
+    const handler = (event) => {
+      const text = event.data;
+      if (typeof text === 'string' && text.startsWith('bestmove')) {
+        stockfish.removeEventListener('message', handler);
+        const move = text.split(' ')[1];
+        resolve(parseAlgebraicMove(move, turnColor, boardState));
+      }
+    };
+
+    stockfish.addEventListener('message', handler);
+    const fen = boardToFEN(boardState, turnColor);
+    stockfish.postMessage(`position fen ${fen}`);
+    stockfish.postMessage('go depth 15');
+  });
+}
+
 // --- LLM Chess Opponent Logic & Helpers ---
 
 function algebraicToCoords(algebraicSquare) { // e.g., "e4"
@@ -544,8 +615,11 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
   addMessageToChat("LLM is thinking...", "System", "system");
 
   if (!apiKey || apiKey.trim() === '') {
-    addMessageToChat("API key not set. LLM will make a random move.", "System", "system-warning");
-    // Fallback to random move
+    if (stockfish) {
+      addMessageToChat("Using Stockfish engine for move.", "System", "system-info");
+      return await getStockfishMove(boardState, turnColor);
+    }
+    addMessageToChat("API key not set and Stockfish unavailable. A random move will be played.", "System", "system-warning");
     const possibleMoves = getAllLegalMoves(turnColor, boardState);
     return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
   }
@@ -586,7 +660,11 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
     const llmMoveString = (responseData.choices && responseData.choices[0] && responseData.choices[0].message && responseData.choices[0].message.content) ? responseData.choices[0].message.content.trim() : null;
 
     if (!llmMoveString) {
-        addMessageToChat("LLM returned an empty move. LLM will make a random move.", "System", "system-warning");
+        if (stockfish) {
+            addMessageToChat("LLM returned no move. Using Stockfish instead.", "System", "system-warning");
+            return await getStockfishMove(boardState, turnColor);
+        }
+        addMessageToChat("LLM returned an empty move. A random move will be played.", "System", "system-warning");
         const possibleMoves = getAllLegalMoves(turnColor, boardState);
         return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
     }
@@ -596,7 +674,11 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
 
   } catch (error) {
     console.error("Error getting LLM move:", error);
-    addMessageToChat(`Error with LLM: ${error.message}. LLM will make a random move.`, "System", "system-error");
+    if (stockfish) {
+      addMessageToChat(`Error with LLM: ${error.message}. Using Stockfish instead.`, "System", "system-error");
+      return await getStockfishMove(boardState, turnColor);
+    }
+    addMessageToChat(`Error with LLM: ${error.message}. A random move will be played.`, "System", "system-error");
     const possibleMoves = getAllLegalMoves(turnColor, boardState);
     return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
   }
@@ -799,6 +881,7 @@ saveApiKeyButton.addEventListener('click', () => {
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
   loadApiKey(); // Load API key when the DOM is ready
+  initializeStockfish();
   renderChessboard();
   addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
 });
