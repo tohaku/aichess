@@ -596,7 +596,7 @@ async function sendChatMessageToLLM(message) {
     const response = await fetch(CHAT_LLM_URL, {
       method: 'POST',
       body: JSON.stringify(chatPayload),
-      headers: { 'Content-type': 'application/json; charset=UTF-8', 'Authorization': `Bearer ${apiKey}`},
+      headers: { 'Content-Type': 'application/json; charset=UTF-8', 'Authorization': `Bearer ${apiKey}`},
     });
 
     if (!response.ok) {
