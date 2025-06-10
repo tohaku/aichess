@@ -78,13 +78,7 @@ function renderChessboard() {
     for (let col = 0; col < 8; col++) {
       const square = document.createElement('div');
       square.classList.add('square');
-      square.style.width = '50px';
-      square.style.height = '50px';
-      square.style.backgroundColor = (row + col) % 2 === 0 ? '#f0d9b5' : '#b58863';
-      square.style.float = 'left';
-      square.style.display = 'flex';
-      square.style.justifyContent = 'center';
-      square.style.alignItems = 'center';
+      square.classList.add((row + col) % 2 === 0 ? 'light-square' : 'dark-square');
       square.dataset.row = row;
       square.dataset.col = col;
 
@@ -93,8 +87,6 @@ function renderChessboard() {
         const pieceImage = document.createElement('img');
         pieceImage.src = imagePath;
         pieceImage.alt = getPieceNameFromPath(imagePath); // Add alt text for accessibility
-        pieceImage.style.width = '100%'; // Make image fill the square
-        pieceImage.style.height = '100%';
         square.appendChild(pieceImage);
       }
       chessboard.appendChild(square);
@@ -566,12 +558,6 @@ function addMessageToChat(message, sender, type = 'normal') {
   const messageElement = document.createElement('p');
   messageElement.textContent = `${sender}: ${message}`;
   messageElement.classList.add(`chat-message-${type}`);
-  if (type === 'user') { messageElement.style.color = 'blue'; messageElement.style.textAlign = 'right';}
-  else if (type === 'llm') { messageElement.style.color = 'green'; }
-  else if (type === 'system') { messageElement.style.fontStyle = 'italic';}
-  else if (type === 'system-info') { messageElement.style.color = '#555'; messageElement.style.fontStyle = 'italic'; }
-  else if (type === 'system-error') { messageElement.style.color = 'red'; messageElement.style.fontWeight = 'bold'; }
-  else if (type === 'system-warning') { messageElement.style.color = 'orange'; }
   messagesContainer.appendChild(messageElement);
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
