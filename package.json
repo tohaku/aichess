@@ -1,0 +1,13 @@
+{
+  "name": "aichess",
+  "version": "1.0.0",
+  "description": "Play chess against an AI powered by OpenAI's language models. The game runs entirely in the browser with HTML, CSS and JavaScript.",
+  "main": "script.js",
+  "scripts": {
+    "test": "node tests/test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
