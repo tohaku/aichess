@@ -73,6 +73,7 @@ function getPieceNameFromPath(imagePath) {
 }
 // --- Chessboard Rendering ---
 function renderChessboard() {
+  // Clear existing board to avoid duplicate elements or listeners
   chessboard.innerHTML = '';
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -87,6 +88,8 @@ function renderChessboard() {
       square.style.alignItems = 'center';
       square.dataset.row = row;
       square.dataset.col = col;
+      // Register click handler for interaction
+      square.addEventListener('click', onSquareClick);
 
       const imagePath = currentBoard[row]?.[col];
       if (imagePath) { // Only add an image if a piece exists on the square
