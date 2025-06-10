@@ -1,19 +1,20 @@
 // --- Constants and State ---
-const chessboard = document.getElementById('chessboard');
-const messagesContainer = document.getElementById('messages');
-const chatInput = document.getElementById('chat-input');
-const sendButton = document.getElementById('send-button');
-const apiKeyInput = document.getElementById('api-key');
-const saveApiKeyButton = document.getElementById('save-api-key-button');
+const chessboard = typeof document !== 'undefined' ? document.getElementById('chessboard') : null;
+const messagesContainer = typeof document !== 'undefined' ? document.getElementById('messages') : null;
+const chatInput = typeof document !== 'undefined' ? document.getElementById('chat-input') : null;
+const sendButton = typeof document !== 'undefined' ? document.getElementById('send-button') : null;
+const apiKeyInput = typeof document !== 'undefined' ? document.getElementById('api-key') : null;
+const saveApiKeyButton = typeof document !== 'undefined' ? document.getElementById('save-api-key-button') : null;
 
 let apiKey = ''; // This will be populated from localStorage
 
 // --- Load API Key on Start ---
 function loadApiKey() {
+  if (typeof localStorage === 'undefined') return;
   const storedApiKey = localStorage.getItem('chessLLMApiKey');
   if (storedApiKey) {
     apiKey = storedApiKey;
-    apiKeyInput.value = storedApiKey; // Populate the input field
+    if (apiKeyInput) apiKeyInput.value = storedApiKey; // Populate the input field
     console.log("API Key loaded from localStorage.");
     addMessageToChat("API Key loaded from local storage.", "System", "system-info"); // Provide feedback
   }
@@ -626,28 +627,49 @@ function handleUserChatSubmit() {
   }
 }
 
-sendButton.addEventListener('click', handleUserChatSubmit);
-chatInput.addEventListener('keypress', (event) => {
-  if (event.key === 'Enter') { event.preventDefault(); handleUserChatSubmit(); }
-});
+if (sendButton) {
+  sendButton.addEventListener('click', handleUserChatSubmit);
+}
+if (chatInput) {
+  chatInput.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); handleUserChatSubmit(); }
+  });
+}
 
 // --- API Key Settings ---
-saveApiKeyButton.addEventListener('click', () => {
-  const potentialApiKey = apiKeyInput.value;
-  if (potentialApiKey && potentialApiKey.trim() !== '') {
-    apiKey = potentialApiKey;
-    localStorage.setItem('chessLLMApiKey', apiKey); // Save to localStorage
-    addMessageToChat('API Key saved successfully.', 'System', 'system');
-  } else {
-    addMessageToChat('API Key cannot be empty.', 'System', 'system');
-  }
-});
+if (saveApiKeyButton) {
+  saveApiKeyButton.addEventListener('click', () => {
+    const potentialApiKey = apiKeyInput ? apiKeyInput.value : '';
+    if (potentialApiKey && potentialApiKey.trim() !== '') {
+      apiKey = potentialApiKey;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('chessLLMApiKey', apiKey); // Save to localStorage
+      }
+      addMessageToChat('API Key saved successfully.', 'System', 'system');
+    } else {
+      addMessageToChat('API Key cannot be empty.', 'System', 'system');
+    }
+  });
+}
 
 // --- Initial Setup ---
-document.addEventListener('DOMContentLoaded', () => {
-  loadApiKey(); // Load API key when the DOM is ready
-  renderChessboard();
-  addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
-});
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    loadApiKey(); // Load API key when the DOM is ready
+    renderChessboard();
+    addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
+  });
+}
+
+// Export functions for testing in Node environment
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    PIECES,
+    isValidPawnMove,
+    isValidRookMove,
+    isMoveValid,
+    getPieceColor,
+  };
+}
  // Added styling for system-info, system-error, system-warning in addMessageToChat
  // Added llm-suggestion type for LLM's raw output before parsing.

@@ -1,0 +1,13 @@
+{
+  "name": "aichess",
+  "version": "1.0.0",
+  "description": "Play Chess vs AI made by AI",
+  "main": "script.js",
+  "scripts": {
+    "test": "node tests/test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
