@@ -5,8 +5,10 @@ const chatInput = document.getElementById('chat-input');
 const sendButton = document.getElementById('send-button');
 const apiKeyInput = document.getElementById('api-key');
 const saveApiKeyButton = document.getElementById('save-api-key-button');
+const difficultySelect = document.getElementById('difficulty');
 
 let apiKey = ''; // This will be populated from localStorage
+let difficulty = 'normal';
 
 // Stockfish engine (loaded as a Web Worker)
 let stockfish = null;
@@ -30,6 +32,14 @@ function loadApiKey() {
     apiKeyInput.value = storedApiKey; // Populate the input field
     console.log("API Key loaded from localStorage.");
     addMessageToChat("API Key loaded from local storage.", "System", "system-info"); // Provide feedback
+  }
+}
+
+function loadDifficulty() {
+  const storedDifficulty = localStorage.getItem('chessDifficulty');
+  if (storedDifficulty) {
+    difficulty = storedDifficulty;
+    if (difficultySelect) difficultySelect.value = storedDifficulty;
   }
 }
 
@@ -624,7 +634,10 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
     return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
   }
 
-  const systemMessage = `You are a chess engine playing as ${turnColor}. Your task is to select the best move. Provide your move ONLY in algebraic notation (e.g., "e7e5", "g1f3", "e1g1" for castling, "e7e8q" for pawn promotion to queen). Do not include any other text, explanations, or apologies. Just the move.`;
+  let systemMessage = `You are a chess engine playing as ${turnColor}. Your task is to select the best move. Provide your move ONLY in algebraic notation (e.g., "e7e5", "g1f3", "e1g1" for castling, "e7e8q" for pawn promotion to queen). Do not include any other text, explanations, or apologies. Just the move.`;
+  if (difficulty === 'training') {
+    systemMessage = `You are a chess coach playing as ${turnColor}. Respond with two lines. First line: MOVE: <your move in algebraic notation>. Second line: ADVICE: a short tip for the human player's next move.`;
+  }
   const userMessageContent = `The human player (${humanPlayerColor === 'white' ? 'white' : 'black'}) just made the move: ${humanLastMove}.
   Current board state (JSON format: row indices map to column objects, which map to piece image paths. Top-left is 0,0 for black's back rank, which is white's perspective of rank 8):
   ${JSON.stringify(boardState, null, 2)}
@@ -643,8 +656,8 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
           { role: "system", content: systemMessage },
           { role: "user", content: userMessageContent }
         ],
-        max_tokens: 15, // For a short move string like "e7e8q"
-        temperature: 0.3, // Lower for more deterministic chess moves
+        max_tokens: difficulty === 'training' ? 60 : 15,
+        temperature: difficulty === 'hard' ? 0.2 : (difficulty === 'training' ? 0.5 : 0.3),
         n: 1
       })
     });
@@ -669,8 +682,15 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
         return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
     }
 
-    addMessageToChat(`LLM suggests move: ${llmMoveString}`, "LLM", "llm-suggestion");
-    return parseAlgebraicMove(llmMoveString, turnColor, boardState);
+    let moveText = llmMoveString;
+    if (difficulty === 'training') {
+        const moveMatch = llmMoveString.match(/MOVE:\s*([a-h][1-8][a-h][1-8][qrbn]?)/i);
+        if (moveMatch) moveText = moveMatch[1];
+        const adviceMatch = llmMoveString.match(/ADVICE:\s*(.*)/i);
+        if (adviceMatch) addMessageToChat(adviceMatch[1].trim(), "LLM", "llm");
+    }
+    addMessageToChat(`LLM suggests move: ${moveText}`, "LLM", "llm-suggestion");
+    return parseAlgebraicMove(moveText, turnColor, boardState);
 
   } catch (error) {
     console.error("Error getting LLM move:", error);
@@ -878,10 +898,16 @@ saveApiKeyButton.addEventListener('click', () => {
   }
 });
 
+difficultySelect.addEventListener('change', () => {
+  difficulty = difficultySelect.value;
+  localStorage.setItem('chessDifficulty', difficulty);
+  addMessageToChat(`Difficulty set to ${difficulty}.`, 'System', 'system-info');
+});
+
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
   loadApiKey(); // Load API key when the DOM is ready
-  initializeStockfish();
+
   renderChessboard();
   addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
 });
