@@ -5,8 +5,24 @@ const chatInput = document.getElementById('chat-input');
 const sendButton = document.getElementById('send-button');
 const apiKeyInput = document.getElementById('api-key');
 const saveApiKeyButton = document.getElementById('save-api-key-button');
+const difficultySelect = document.getElementById('difficulty');
 
 let apiKey = ''; // This will be populated from localStorage
+let difficulty = 'normal';
+
+// Stockfish engine (loaded as a Web Worker)
+let stockfish = null;
+
+function initializeStockfish() {
+  try {
+    stockfish = new Worker('https://cdn.jsdelivr.net/npm/stockfish/stockfish.js');
+    stockfish.postMessage('uci');
+    console.log('Stockfish initialized');
+  } catch (err) {
+    console.error('Failed to load Stockfish:', err);
+    stockfish = null;
+  }
+}
 
 // --- Load API Key on Start ---
 function loadApiKey() {
@@ -16,6 +32,14 @@ function loadApiKey() {
     apiKeyInput.value = storedApiKey; // Populate the input field
     console.log("API Key loaded from localStorage.");
     addMessageToChat("API Key loaded from local storage.", "System", "system-info"); // Provide feedback
+  }
+}
+
+function loadDifficulty() {
+  const storedDifficulty = localStorage.getItem('chessDifficulty');
+  if (storedDifficulty) {
+    difficulty = storedDifficulty;
+    if (difficultySelect) difficultySelect.value = storedDifficulty;
   }
 }
 
@@ -53,6 +77,11 @@ const initialBoardSetup = {
 
 let currentBoard = JSON.parse(JSON.stringify(initialBoardSetup));
 let gameActive = true; // Flag to control if moves can be made
+let lastMove = null;
+const castlingRights = {
+  white: { kingMoved: false, rookA: false, rookH: false },
+  black: { kingMoved: false, rookA: false, rookH: false }
+};
 
 // --- Helper function for image alt text ---
 function getPieceNameFromPath(imagePath) {
@@ -73,6 +102,7 @@ function getPieceNameFromPath(imagePath) {
 }
 // --- Chessboard Rendering ---
 function renderChessboard() {
+  // Clear existing board to avoid duplicate elements or listeners
   chessboard.innerHTML = '';
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -81,6 +111,8 @@ function renderChessboard() {
       square.classList.add((row + col) % 2 === 0 ? 'light-square' : 'dark-square');
       square.dataset.row = row;
       square.dataset.col = col;
+      // Register click handler for interaction
+      square.addEventListener('click', onSquareClick);
 
       const imagePath = currentBoard[row]?.[col];
       if (imagePath) { // Only add an image if a piece exists on the square
@@ -89,6 +121,7 @@ function renderChessboard() {
         pieceImage.alt = getPieceNameFromPath(imagePath); // Add alt text for accessibility
         square.appendChild(pieceImage);
       }
+      square.addEventListener('click', onSquareClick);
       chessboard.appendChild(square);
     }
   }
@@ -136,7 +169,14 @@ function isValidPawnMove(fromRow, fromCol, toRow, toCol, pieceColor, board) {
       return true;
     }
   }
-  // TODO: En passant
+  // En passant
+  if (Math.abs(fromCol - toCol) === 1 && board[toRow]?.[toCol] === undefined && toRow === fromRow + direction) {
+    if (lastMove && lastMove.pieceSymbol === PIECES[opponentColor].pawn &&
+        Math.abs(lastMove.toRow - lastMove.fromRow) === 2 &&
+        lastMove.toRow === fromRow && lastMove.toCol === toCol) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -180,11 +220,32 @@ function isValidQueenMove(fromRow, fromCol, toRow, toCol, board) {
     return isValidRookMove(fromRow, fromCol, toRow, toCol, board) || isValidBishopMove(fromRow, fromCol, toRow, toCol, board);
 }
 
-function isValidKingMove(fromRow, fromCol, toRow, toCol) {
+function isValidKingMove(fromRow, fromCol, toRow, toCol, board, pieceColor) {
     const dRow = Math.abs(toRow - fromRow);
     const dCol = Math.abs(toCol - fromCol);
-    return dRow <= 1 && dCol <= 1 && (dRow + dCol > 0);
-    // TODO: Castling
+    if (dRow <= 1 && dCol <= 1 && (dRow + dCol > 0)) return true;
+
+    if (dRow === 0 && dCol === 2 && fromRow === (pieceColor === 'white' ? 7 : 0)) {
+        const rights = castlingRights[pieceColor];
+        if (rights.kingMoved) return false;
+        const opponentColor = pieceColor === 'white' ? 'black' : 'white';
+        if (toCol === 6) { // kingside
+            if (rights.rookH) return false;
+            if (board[fromRow]?.[5] || board[fromRow]?.[6]) return false;
+            if (isSquareUnderAttack(fromRow, 4, opponentColor, board) ||
+                isSquareUnderAttack(fromRow, 5, opponentColor, board) ||
+                isSquareUnderAttack(fromRow, 6, opponentColor, board)) return false;
+            return board[fromRow]?.[7] === PIECES[pieceColor].rook;
+        } else if (toCol === 2) { // queenside
+            if (rights.rookA) return false;
+            if (board[fromRow]?.[1] || board[fromRow]?.[2] || board[fromRow]?.[3]) return false;
+            if (isSquareUnderAttack(fromRow, 4, opponentColor, board) ||
+                isSquareUnderAttack(fromRow, 3, opponentColor, board) ||
+                isSquareUnderAttack(fromRow, 2, opponentColor, board)) return false;
+            return board[fromRow]?.[0] === PIECES[pieceColor].rook;
+        }
+    }
+    return false;
 }
 
 function isMoveValid(pieceSymbol, fromRow, fromCol, toRow, toCol, board) {
@@ -201,7 +262,7 @@ function isMoveValid(pieceSymbol, fromRow, fromCol, toRow, toCol, board) {
   if (pieceSymbol === PIECES.white.knight || pieceSymbol === PIECES.black.knight) return isValidKnightMove(fromRow, fromCol, toRow, toCol);
   if (pieceSymbol === PIECES.white.bishop || pieceSymbol === PIECES.black.bishop) return isValidBishopMove(fromRow, fromCol, toRow, toCol, board);
   if (pieceSymbol === PIECES.white.queen || pieceSymbol === PIECES.black.queen) return isValidQueenMove(fromRow, fromCol, toRow, toCol, board);
-  if (pieceSymbol === PIECES.white.king || pieceSymbol === PIECES.black.king) return isValidKingMove(fromRow, fromCol, toRow, toCol);
+  if (pieceSymbol === PIECES.white.king || pieceSymbol === PIECES.black.king) return isValidKingMove(fromRow, fromCol, toRow, toCol, board, pieceColor);
   return false;
 }
 
@@ -232,7 +293,49 @@ async function onSquareClick(event) {
     if (isMoveValid(pieceSymbol, fromRow, fromCol, toRow, toCol, currentBoard)) {
       const tempBoard = JSON.parse(JSON.stringify(currentBoard));
       tempBoard[toRow] = tempBoard[toRow] || {};
-      tempBoard[toRow][toCol] = pieceSymbol;
+      let pieceToPlace = pieceSymbol;
+      const color = getPieceColor(pieceSymbol);
+
+      // En passant capture
+      if ((pieceSymbol === PIECES.white.pawn || pieceSymbol === PIECES.black.pawn) &&
+          Math.abs(fromCol - toCol) === 1 && currentBoard[toRow]?.[toCol] === undefined) {
+        const captureRow = fromRow;
+        if (tempBoard[captureRow]) {
+          delete tempBoard[captureRow][toCol];
+          if (Object.keys(tempBoard[captureRow]).length === 0) delete tempBoard[captureRow];
+        }
+      }
+
+      // Castling rook movement and rights
+      if (pieceSymbol === PIECES.white.king || pieceSymbol === PIECES.black.king) {
+        castlingRights[color].kingMoved = true;
+        if (Math.abs(toCol - fromCol) === 2) {
+          if (toCol === 6) { // kingside
+            tempBoard[fromRow][5] = tempBoard[fromRow][7];
+            delete tempBoard[fromRow][7];
+            castlingRights[color].rookH = true;
+          } else if (toCol === 2) { // queenside
+            tempBoard[fromRow][3] = tempBoard[fromRow][0];
+            delete tempBoard[fromRow][0];
+            castlingRights[color].rookA = true;
+          }
+        }
+      }
+
+      if (pieceSymbol === PIECES.white.rook || pieceSymbol === PIECES.black.rook) {
+        if (fromRow === (color === 'white' ? 7 : 0)) {
+          if (fromCol === 0) castlingRights[color].rookA = true;
+          if (fromCol === 7) castlingRights[color].rookH = true;
+        }
+      }
+
+      // Pawn promotion
+      if ((pieceSymbol === PIECES.white.pawn && toRow === 0) ||
+          (pieceSymbol === PIECES.black.pawn && toRow === 7)) {
+        pieceToPlace = PIECES[color].queen;
+      }
+
+      tempBoard[toRow][toCol] = pieceToPlace;
       if (tempBoard[fromRow]) {
           delete tempBoard[fromRow][fromCol];
           if (Object.keys(tempBoard[fromRow]).length === 0) delete tempBoard[fromRow];
@@ -244,6 +347,7 @@ async function onSquareClick(event) {
         selectedPiece = null;
       } else {
         currentBoard = tempBoard;
+        lastMove = { fromRow, fromCol, toRow, toCol, pieceSymbol, doubleStep: (pieceSymbol === PIECES.white.pawn || pieceSymbol === PIECES.black.pawn) && Math.abs(toRow - fromRow) === 2 };
         selectedElement.classList.remove('selected');
         selectedPiece = null;
         renderChessboard();
@@ -320,6 +424,28 @@ function isKingInCheck(kingColor, boardState) {
   return false;
 }
 
+function isSquareUnderAttack(row, col, attackerColor, boardState) {
+  for (let r = 0; r < 8; r++) {
+    if (boardState[r]) {
+      for (let c = 0; c < 8; c++) {
+        const piece = boardState[r][c];
+        if (piece && getPieceColor(piece) === attackerColor) {
+          if (piece === PIECES[attackerColor].king) {
+            if (Math.abs(row - r) <= 1 && Math.abs(col - c) <= 1 && (row !== r || col !== c)) {
+              return true;
+            }
+          } else {
+            if (isMoveValid(piece, r, c, row, col, boardState)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function getPseudoLegalMovesForPiece(pieceSymbol, fromRow, fromCol, boardState) {
     const moves = [];
     for (let r = 0; r < 8; r++) {
@@ -364,6 +490,63 @@ function canMoveOutOfCheck(kingColor, boardState) {
   return getAllLegalMoves(kingColor, boardState).length > 0;
 }
 
+// --- Stockfish Helpers ---
+const FEN_PIECE_MAP = {
+  [PIECES.white.king]: 'K',
+  [PIECES.white.queen]: 'Q',
+  [PIECES.white.rook]: 'R',
+  [PIECES.white.bishop]: 'B',
+  [PIECES.white.knight]: 'N',
+  [PIECES.white.pawn]: 'P',
+  [PIECES.black.king]: 'k',
+  [PIECES.black.queen]: 'q',
+  [PIECES.black.rook]: 'r',
+  [PIECES.black.bishop]: 'b',
+  [PIECES.black.knight]: 'n',
+  [PIECES.black.pawn]: 'p'
+};
+
+function boardToFEN(boardState, turnColor) {
+  const rows = [];
+  for (let r = 0; r < 8; r++) {
+    let empty = 0;
+    let rowStr = '';
+    for (let c = 0; c < 8; c++) {
+      const piece = boardState[r]?.[c];
+      if (piece) {
+        if (empty) { rowStr += empty; empty = 0; }
+        rowStr += FEN_PIECE_MAP[piece] || '';
+      } else {
+        empty++;
+      }
+    }
+    if (empty) rowStr += empty;
+    rows.push(rowStr);
+  }
+  const boardPart = rows.join('/');
+  return `${boardPart} ${turnColor === 'white' ? 'w' : 'b'} - - 0 1`;
+}
+
+function getStockfishMove(boardState, turnColor) {
+  return new Promise((resolve) => {
+    if (!stockfish) { resolve(null); return; }
+
+    const handler = (event) => {
+      const text = event.data;
+      if (typeof text === 'string' && text.startsWith('bestmove')) {
+        stockfish.removeEventListener('message', handler);
+        const move = text.split(' ')[1];
+        resolve(parseAlgebraicMove(move, turnColor, boardState));
+      }
+    };
+
+    stockfish.addEventListener('message', handler);
+    const fen = boardToFEN(boardState, turnColor);
+    stockfish.postMessage(`position fen ${fen}`);
+    stockfish.postMessage('go depth 15');
+  });
+}
+
 // --- LLM Chess Opponent Logic & Helpers ---
 
 function algebraicToCoords(algebraicSquare) { // e.g., "e4"
@@ -387,7 +570,12 @@ function parseAlgebraicMove(moveString, playerColor, board) { // e.g., "e2e4" or
 
     const fromAlg = moveString.substring(0, 2);
     const toAlg = moveString.substring(2, 4);
-    // TODO: Handle promotion piece if present (e.g., moveString.charAt(4) for 'q', 'r', 'b', 'n')
+    let promotion = null;
+    if (moveString.length === 5) {
+        const promoChar = moveString.charAt(4).toLowerCase();
+        const map = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight' };
+        if (map[promoChar]) promotion = PIECES[playerColor][map[promoChar]];
+    }
 
     const fromCoords = algebraicToCoords(fromAlg);
     const toCoords = algebraicToCoords(toAlg);
@@ -420,7 +608,8 @@ function parseAlgebraicMove(moveString, playerColor, board) { // e.g., "e2e4" or
         fromCol: fromCoords.col,
         toRow: toCoords.row,
         toCol: toCoords.col,
-        pieceSymbol: pieceSymbol // The actual piece on the 'from' square
+        pieceSymbol: pieceSymbol,
+        promotion
     };
 }
 
@@ -428,13 +617,19 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
   addMessageToChat("LLM is thinking...", "System", "system");
 
   if (!apiKey || apiKey.trim() === '') {
-    addMessageToChat("API key not set. LLM will make a random move.", "System", "system-warning");
-    // Fallback to random move
+    if (stockfish) {
+      addMessageToChat("Using Stockfish engine for move.", "System", "system-info");
+      return await getStockfishMove(boardState, turnColor);
+    }
+    addMessageToChat("API key not set and Stockfish unavailable. A random move will be played.", "System", "system-warning");
     const possibleMoves = getAllLegalMoves(turnColor, boardState);
     return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
   }
 
-  const systemMessage = `You are a chess engine playing as ${turnColor}. Your task is to select the best move. Provide your move ONLY in algebraic notation (e.g., "e7e5", "g1f3", "e1g1" for castling, "e7e8q" for pawn promotion to queen). Do not include any other text, explanations, or apologies. Just the move.`;
+  let systemMessage = `You are a chess engine playing as ${turnColor}. Your task is to select the best move. Provide your move ONLY in algebraic notation (e.g., "e7e5", "g1f3", "e1g1" for castling, "e7e8q" for pawn promotion to queen). Do not include any other text, explanations, or apologies. Just the move.`;
+  if (difficulty === 'training') {
+    systemMessage = `You are a chess coach playing as ${turnColor}. Respond with two lines. First line: MOVE: <your move in algebraic notation>. Second line: ADVICE: a short tip for the human player's next move.`;
+  }
   const userMessageContent = `The human player (${humanPlayerColor === 'white' ? 'white' : 'black'}) just made the move: ${humanLastMove}.
   Current board state (JSON format: row indices map to column objects, which map to piece image paths. Top-left is 0,0 for black's back rank, which is white's perspective of rank 8):
   ${JSON.stringify(boardState, null, 2)}
@@ -453,8 +648,8 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
           { role: "system", content: systemMessage },
           { role: "user", content: userMessageContent }
         ],
-        max_tokens: 15, // For a short move string like "e7e8q"
-        temperature: 0.3, // Lower for more deterministic chess moves
+        max_tokens: difficulty === 'training' ? 60 : 15,
+        temperature: difficulty === 'hard' ? 0.2 : (difficulty === 'training' ? 0.5 : 0.3),
         n: 1
       })
     });
@@ -470,17 +665,32 @@ async function getLLMMove(boardState, turnColor, humanLastMove) {
     const llmMoveString = (responseData.choices && responseData.choices[0] && responseData.choices[0].message && responseData.choices[0].message.content) ? responseData.choices[0].message.content.trim() : null;
 
     if (!llmMoveString) {
-        addMessageToChat("LLM returned an empty move. LLM will make a random move.", "System", "system-warning");
+        if (stockfish) {
+            addMessageToChat("LLM returned no move. Using Stockfish instead.", "System", "system-warning");
+            return await getStockfishMove(boardState, turnColor);
+        }
+        addMessageToChat("LLM returned an empty move. A random move will be played.", "System", "system-warning");
         const possibleMoves = getAllLegalMoves(turnColor, boardState);
         return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
     }
 
-    addMessageToChat(`LLM suggests move: ${llmMoveString}`, "LLM", "llm-suggestion");
-    return parseAlgebraicMove(llmMoveString, turnColor, boardState);
+    let moveText = llmMoveString;
+    if (difficulty === 'training') {
+        const moveMatch = llmMoveString.match(/MOVE:\s*([a-h][1-8][a-h][1-8][qrbn]?)/i);
+        if (moveMatch) moveText = moveMatch[1];
+        const adviceMatch = llmMoveString.match(/ADVICE:\s*(.*)/i);
+        if (adviceMatch) addMessageToChat(adviceMatch[1].trim(), "LLM", "llm");
+    }
+    addMessageToChat(`LLM suggests move: ${moveText}`, "LLM", "llm-suggestion");
+    return parseAlgebraicMove(moveText, turnColor, boardState);
 
   } catch (error) {
     console.error("Error getting LLM move:", error);
-    addMessageToChat(`Error with LLM: ${error.message}. LLM will make a random move.`, "System", "system-error");
+    if (stockfish) {
+      addMessageToChat(`Error with LLM: ${error.message}. Using Stockfish instead.`, "System", "system-error");
+      return await getStockfishMove(boardState, turnColor);
+    }
+    addMessageToChat(`Error with LLM: ${error.message}. A random move will be played.`, "System", "system-error");
     const possibleMoves = getAllLegalMoves(turnColor, boardState);
     return possibleMoves.length > 0 ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)] : null;
   }
@@ -491,7 +701,7 @@ async function handleLLMTurn(humanLastMoveDescription) {
   const llmMoveData = await getLLMMove(currentBoard, llmPlayerColor, humanLastMoveDescription);
 
   if (llmMoveData) {
-    const { fromRow, fromCol, toRow, toCol } = llmMoveData;
+    const { fromRow, fromCol, toRow, toCol, promotion } = llmMoveData;
     const pieceSymbolToMove = currentBoard[fromRow]?.[fromCol];
 
     if (!pieceSymbolToMove || getPieceColor(pieceSymbolToMove) !== llmPlayerColor) {
@@ -502,7 +712,51 @@ async function handleLLMTurn(humanLastMoveDescription) {
     if (isMoveValid(pieceSymbolToMove, fromRow, fromCol, toRow, toCol, currentBoard)) {
       const tempBoard = JSON.parse(JSON.stringify(currentBoard));
       tempBoard[toRow] = tempBoard[toRow] || {};
-      tempBoard[toRow][toCol] = pieceSymbolToMove;
+      let pieceToPlace = pieceSymbolToMove;
+      const color = getPieceColor(pieceSymbolToMove);
+
+      // En passant capture
+      if ((pieceSymbolToMove === PIECES.white.pawn || pieceSymbolToMove === PIECES.black.pawn) &&
+          Math.abs(fromCol - toCol) === 1 && currentBoard[toRow]?.[toCol] === undefined) {
+        const captureRow = fromRow;
+        if (tempBoard[captureRow]) {
+          delete tempBoard[captureRow][toCol];
+          if (Object.keys(tempBoard[captureRow]).length === 0) delete tempBoard[captureRow];
+        }
+      }
+
+      // Castling rook movement and rights
+      if (pieceSymbolToMove === PIECES.white.king || pieceSymbolToMove === PIECES.black.king) {
+        castlingRights[color].kingMoved = true;
+        if (Math.abs(toCol - fromCol) === 2) {
+          if (toCol === 6) {
+            tempBoard[fromRow][5] = tempBoard[fromRow][7];
+            delete tempBoard[fromRow][7];
+            castlingRights[color].rookH = true;
+          } else if (toCol === 2) {
+            tempBoard[fromRow][3] = tempBoard[fromRow][0];
+            delete tempBoard[fromRow][0];
+            castlingRights[color].rookA = true;
+          }
+        }
+      }
+
+      if (pieceSymbolToMove === PIECES.white.rook || pieceSymbolToMove === PIECES.black.rook) {
+        if (fromRow === (color === 'white' ? 7 : 0)) {
+          if (fromCol === 0) castlingRights[color].rookA = true;
+          if (fromCol === 7) castlingRights[color].rookH = true;
+        }
+      }
+
+      // Promotion from algebraic move
+      if (promotion) {
+        pieceToPlace = promotion;
+      } else if ((pieceSymbolToMove === PIECES.white.pawn && toRow === 0) ||
+                 (pieceSymbolToMove === PIECES.black.pawn && toRow === 7)) {
+        pieceToPlace = PIECES[color].queen;
+      }
+
+      tempBoard[toRow][toCol] = pieceToPlace;
       if (tempBoard[fromRow]) {
         delete tempBoard[fromRow][fromCol];
         if (Object.keys(tempBoard[fromRow]).length === 0) delete tempBoard[fromRow];
@@ -514,6 +768,7 @@ async function handleLLMTurn(humanLastMoveDescription) {
       }
 
       currentBoard = tempBoard;
+      lastMove = { fromRow, fromCol, toRow, toCol, pieceSymbol: pieceSymbolToMove, doubleStep: (pieceSymbolToMove === PIECES.white.pawn || pieceSymbolToMove === PIECES.black.pawn) && Math.abs(toRow - fromRow) === 2 };
       renderChessboard();
       const llmMoveFromAlg = coordsToAlgebraic(fromRow, fromCol);
       const llmMoveToAlg = coordsToAlgebraic(toRow, toCol);
@@ -629,9 +884,16 @@ saveApiKeyButton.addEventListener('click', () => {
   }
 });
 
+difficultySelect.addEventListener('change', () => {
+  difficulty = difficultySelect.value;
+  localStorage.setItem('chessDifficulty', difficulty);
+  addMessageToChat(`Difficulty set to ${difficulty}.`, 'System', 'system-info');
+});
+
 // --- Initial Setup ---
 document.addEventListener('DOMContentLoaded', () => {
   loadApiKey(); // Load API key when the DOM is ready
+
   renderChessboard();
   addMessageToChat(`Welcome! You are playing as ${humanPlayerColor}. ${humanPlayerColor}'s turn.`, 'System', 'system');
 });
