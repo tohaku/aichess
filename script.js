@@ -97,6 +97,7 @@ function renderChessboard() {
         pieceImage.style.height = '100%';
         square.appendChild(pieceImage);
       }
+      square.addEventListener('click', onSquareClick);
       chessboard.appendChild(square);
     }
   }
