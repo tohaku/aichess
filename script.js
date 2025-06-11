@@ -15,12 +15,23 @@ let stockfish = null;
 
 function initializeStockfish() {
   try {
-    stockfish = new Worker('https://cdn.jsdelivr.net/npm/stockfish/stockfish.js');
+    stockfish = new Worker('stockfish-worker.js');
     stockfish.postMessage('uci');
-    console.log('Stockfish initialized');
-    addMessageToChat('Stockfish engine loaded.', 'System', 'system-info');
+    stockfish.onmessage = (e) => {
+      if (typeof e.data === 'string' && e.data.includes('uciok')) {
+        addMessageToChat('Stockfish engine loaded.', 'System', 'system-info');
+        stockfish.onmessage = null;
+      }
+    };
+    stockfish.onerror = (err) => {
+      console.error('Failed to load Stockfish:', err);
+      addMessageToChat('Stockfish engine failed to load.', 'System', 'system-warning');
+      stockfish.terminate();
+      stockfish = null;
+    };
+    console.log('Stockfish worker created');
   } catch (err) {
-    console.error('Failed to load Stockfish:', err);
+    console.error('Failed to create Stockfish worker:', err);
     stockfish = null;
     addMessageToChat('Stockfish engine failed to load.', 'System', 'system-warning');
   }
