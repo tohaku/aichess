@@ -37,7 +37,7 @@ If no API key is configured for the language model, the game tries to use the
 [Stockfish](https://stockfishchess.org/) engine via a Web Worker. The worker
 loads `stockfish.js` locally. Due to the file size, `stockfish.wasm` is not
 included in the repository. Download the WebAssembly file from
-`https://cdn.jsdelivr.net/npm/stockfish/stockfish.wasm` and place it next to the
+`https://cdn.jsdelivr.net/npm/stockfish@16.0.0/src/stockfish-nnue-16.wasm` and place it next to the
 worker script so it can be loaded at runtime. Once added, the game works
 offline. If the engine fails to load, the game falls back to a random move.
 
